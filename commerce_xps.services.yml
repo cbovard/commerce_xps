@@ -1,0 +1,4 @@
+services:
+  commerce_xps.xps_rate_request:
+    class: Drupal\commerce_xps\XPSRateRequest
+    arguments: ["@commerce_xps.xps_shipment", "@event_dispatcher"]

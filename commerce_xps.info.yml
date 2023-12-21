@@ -1,0 +1,7 @@
+name: Commerce XPS
+type: module
+description: XPS Shipping Module for Drupal Commerce
+core_version_requirement: ^9 || ^10
+package: Commerce (shipping)
+dependencies:
+  - commerce_shipping
