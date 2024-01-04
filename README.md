@@ -1,20 +1,21 @@
-# Commerce XPS Shipping
+COMMERCE UPS
+============
 
-Provides XPS Shipping shipping rates for Drupal Commerce.
+Provides UPS shipping functionality for Drupal Commerce, based heavily on the
+work done by [Commerce Fedex](https://github.com/bmcclure/drupal-commerce_fedex).
 
-## Admin Setup
 
-1. Install and enable the module here /admin/modules
+DEVELOPMENT SETUP
+-----------------
 
-2. Will need to sign up for an account here https://signup.xpsship.com/
-   - This module is based on the https://xpsship.com/xps-custom-software-integrations/restful-api-integration/
+1. Use [Composer](https://getcomposer.org/) to get Commerce UPS with all
+dependencies: `composer require drupal/commerce_ups`
 
-3. After you sign up for an account. You need to sign into here https://xpsship.zendesk.com
+2. Enable module.
 
-4. Here is the Setup to access the REST API for the Module:
-   - Add E-commerce Integration https://xpsship.zendesk.com/hc/en-us/articles/4401761648276-Custom-Integration-Options-ODBC-REST-API-and-Webhooks
-   - Get your API Key and Customer ID https://xpsshipper.com/restapi/docs/v1-ecommerce/endpoints/overview/
-
-5. Go to /admin/commerce/config/shipping-methods/add:
-   - Select XPS Shipping as the Plugin
-   - Enter the XPS API details
+3. Go to /admin/commerce/config/shipping-methods/add:
+  * Select 'UPS' as the Plugin
+  * Enter the UPS API details
+  * Select a default package type
+  * Select all the shipping services that should be enabled
+  * Fill out any of the optional configs and save configuration

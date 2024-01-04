@@ -10,7 +10,7 @@ use Drupal\Core\Routing\RouteMatchInterface;
 /**
  * Implements hook_help().
  */
-function commerce_usps_help($route_name, RouteMatchInterface $route_match) {
+function commerce_xps_help($route_name, RouteMatchInterface $route_match) {
   switch ($route_name) {
     // Main module help for the commerce_xps module.
     case 'help.page.commerce_xps':
