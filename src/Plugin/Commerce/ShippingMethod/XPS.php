@@ -13,6 +13,7 @@ use Drupal\commerce_shipping\ShippingService;
 use Drupal\state_machine\WorkflowManagerInterface;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Component\Serialization\Json;
+use Drupal\Core\StringTranslation\TranslatableMarkup;
 
 /**
  * Provides the XPS shipping method.
@@ -20,6 +21,38 @@ use Drupal\Component\Serialization\Json;
  * @CommerceShippingMethod(
  *  id = "xps",
  *  label = @Translation("XPS Shipping"),
+ *  services = {
+ *    "dhl_express_worldwide" = @translation("DHL Intl Express"),
+ *    "fedex_international_priority" = @translation("FedEx International Priority®"),
+ *    "fedex_international_economy" = @translation("FedEx International Economy®"),
+ *    "fedex_ground_canada" = @translation("FedEx International Ground®"),
+ *    "ups_standard" = @translation("UPS® Standard"),
+ *    "ups_worldwide_express" = @translation("UPS Worldwide Express®"),
+ *    "ups_express_plus" = @translation("UPS Worldwide Express Plus®"),
+ *    "ups_worldwide_expedited" = @translation("UPS Worldwide Expedited®"),
+ *    "ups_worldwide_saver" = @translation("UPS Worldwide Saver®"),
+ *    "ups_next_day_air" = @translation("UPS Next Day Air®"),
+ *    "ups_second_day_air" = @translation("UPS 2nd Day Air®"),
+ *    "ups_ground" = @translation("UPS® Ground"),
+ *    "usps_international_first_class" = @translation("USPS International First Class"),
+ *    "fedex_priority_overnight" = @translation("FedEx Priority Overnight®"),
+ *    "fedex_first_overnight" = @translation("FedEx First Overnight®"),
+ *    "fedex_standard_overnight" = @translation("FedEx Standard Overnight®"),
+ *    "fedex_two_day" = @translation("FedEx 2Day®"),
+ *    "fedex_express_saver" = @translation("FedEx Express Saver®"),
+ *    "fedex_ground" = @translation("FedEx Ground®"),
+ *    "fedex_ground_home_delivery" = @translation("FedEx Home Delivery®"),
+ *    "ups_next_day_air_early_am" = @translation("UPS Next Day Air® Early"),
+ *    "ups_next_day_air_saver" = @translation("UPS Next Day Air Saver®"),
+ *    "ups_second_day_air_am" = @translation("UPS 2nd Day Air A.M.®"),
+ *    "ups_three_day_select" = @translation("UPS 3 Day Select®"),
+ *    "usps_international_priority" = @translation("USPS International Priority"),
+ *    "usps_international_express" = @translation("USPS International Express"),
+ *    "usps_priority" = @translation("USPS Priority (1-3 Days)"),
+ *    "usps_express" = @translation("USPS Priority Mail Express"),
+ *    "usps_first_class" = @translation("USPS First Class"),
+ *    "usps_ground_advantage" = @translation("USPS Ground Advantage"),
+ *  }
  * )
  */
 class XPS extends ShippingMethodBase {
@@ -60,6 +93,9 @@ class XPS extends ShippingMethodBase {
    *   The workflow manager.
    */
   public function __construct(array $configuration, $plugin_id, $plugin_definition, PackageTypeManagerInterface $package_type_manager, WorkflowManagerInterface $workflow_manager) {
+
+    $plugin_definition = $this->preparePluginDefinition($plugin_definition, $configuration);
+
     parent::__construct($configuration, $plugin_id, $plugin_definition, $package_type_manager, $workflow_manager);
 
     // Adding the Price Rounder.
@@ -68,10 +104,123 @@ class XPS extends ShippingMethodBase {
     // Get Current Store Country.
     $this->currentCountry = \Drupal::service('commerce.current_country');
 
-    // Get the XPS Services.
-    $this->getServices();
+    // Custom Shipping Services here - TODO dynamic
+    // $this->services['usps_priority'] = new ShippingService('usps_priority', $this->t('USPS Priority (1-3 Days)'));
+    // $this->services['usps_express'] = new ShippingService('usps_express', $this->t('USPS Priority Mail Express'));
+    // $this->services['usps_first_class'] = new ShippingService('usps_first_class', $this->t('USPS First Class'));
+    // $this->services['usps_ground_advantage'] = new ShippingService('usps_ground_advantage', $this->t('USPS Ground Advantage'));
 
-    // kint("faak");
+  }
+
+  /**
+   * Prepares the service array keys to support integer values.
+   *
+   * @param array $plugin_definition
+   *   The plugin definition provided to the class.
+   *
+   * @return array
+   *   The prepared plugin definition.
+   */
+  private function preparePluginDefinition($plugin_definition, $configuration) {
+
+    // Sort the Services alpha.
+    uasort($plugin_definition['services'], function (TranslatableMarkup $a, TranslatableMarkup $b) {
+      return $a->getUntranslatedString() < $b->getUntranslatedString() ? -1 : 1;
+    });
+
+    // Check of the XPS API info has been added.
+    if((isset($configuration['api_information']['api_key']) && !empty($configuration['api_information']['api_key']))
+      && (isset($configuration['api_information']['customer_id']) && !empty($configuration['api_information']['customer_id']))) {
+      // Get the Services JSON from the XPS API.
+      $xps_services = $this->getXPSServices($configuration);
+    }
+    else {
+      // Add the Drupal DB Log that the API info is missing.
+      \Drupal::logger('Commerce XPS')->error('@message', [
+        '@message' => 'Your XPS API key and/or Customer ID is missing!'
+      ]);
+
+      // Return if empty XPS API Login.
+      return $plugin_definition;
+    }
+
+    // We will rebuild the Services below based on supported countries.
+    $services = $plugin_definition['services'];
+    unset($plugin_definition['services']);
+
+    $store_country_code = \Drupal::service('commerce.current_country')->getCountry()->getCountryCode();
+
+    // Create an array using serviceCode as the key from the XPS Service API Array.
+    $services2Lookup = [];
+    foreach ($xps_services['services'] as $item) {
+      $services2Lookup[$item['serviceCode']] = $item;
+    }
+
+    // Loop through the plugin $services and look up information in $services2Lookup.
+    foreach ($services as $key => $service) {
+      // Assuming the key is the serviceCode in your case.
+      $serviceCode = $key;
+
+      // Check if the serviceCode exists in $services2Lookup XPS Array.
+      if (isset($services2Lookup[$serviceCode])) {
+        // This is the matched array we need to check below.
+        $matchedService = $services2Lookup[$serviceCode];
+
+        // Null will mean all countries are supported as per api docs.
+        // Supported countries are null and the country code is not in the unsupported countries.
+        if ($matchedService['supportedCountries'] === null && ($matchedService['unsupportedCountries'] !== null && !in_array($store_country_code, $matchedService['unsupportedCountries']))) {
+          // Need to add Shipping service for this logic. US is not included as an example.
+          $plugin_definition['services'][$serviceCode] = $service;
+        } elseif ($matchedService['supportedCountries'] !== null && in_array($store_country_code, $matchedService['supportedCountries'])) {
+          // Supported countries is not null and the country code is in supported countries.
+          $plugin_definition['services'][$serviceCode] = $service;
+        } elseif ($matchedService['unsupportedCountries'] !== null && in_array($store_country_code, $matchedService['unsupportedCountries'])) {
+          // When the country is in the unsupported list continue.
+          continue;
+        } else {
+          // Add the shipping service as this is a fallback.
+          $plugin_definition['services'][$serviceCode] = $service;
+        }
+      }
+    }
+
+    return $plugin_definition;
+  }
+
+  /**
+   * Get all the XPS Services and add the to the Shipping Methods.
+   */
+  public function getXPSServices($configuration) {
+    // XPS Services
+    $auth_api_key = 'RSIS ' . $configuration['api_information']['api_key'];
+    $customer_id = $configuration['api_information']['customer_id'];
+
+    // XPS Services Endpoint
+    $uri = 'https://xpsshipper.com/restapi/v1/customers/'. $customer_id . '/services';
+
+    $json_data = null;
+
+    // Initialize the Guzzle HTTP Client.
+    $client = \Drupal::httpClient();
+    try {
+      // Set various headers on a request
+      $response = $client->get($uri, [
+        'headers' => [
+          'Authorization' => $auth_api_key
+        ]
+      ]);
+      $stream = $response->getBody();
+      $json_data = Json::decode($stream);
+    }
+    // Guzzle Exceptions - /vendor/guzzlehttp/guzzle/src/Exception
+    catch (ClientException $e) {
+      \Drupal::messenger()->addError($e->getMessage());
+    }
+    catch (\Exception $e) {
+      \Drupal::messenger()->addError($e->getMessage());
+    }
+
+    return $json_data;
   }
 
   /**
@@ -92,74 +241,6 @@ class XPS extends ShippingMethodBase {
    */
   public function setShippingMethod(ShippingMethodInterface $shipping_method) {
     $this->shippingMethod = $shipping_method;
-  }
-
-  /**
-   * Get all the XPS Services and add the to the Shipping Methods.
-   */
-  public function getServices() {
-    // // XPS https://xpsshipper.com/restapi/docs/v1-ecommerce/endpoints/list-services/
-    // $customer_id = $this->configuration['api_information']['customer_id'];
-    // $auth_api_key = 'RSIS ' . $this->configuration['api_information']['api_key'];
-
-    // // Initialize the Guzzle HTTP Client.
-    // $client = \Drupal::httpClient();
-    // // XPS Services Endpoint
-    // $uri = 'https://xpsshipper.com/restapi/v1/customers/'. $customer_id . '/services';
-
-    // try {
-    //   // Set various headers on a request
-    //   $response = $client->get($uri, [
-    //     'headers' => [
-    //       'Authorization' => $auth_api_key
-    //     ]
-    //   ]);
-    //   $stream = $response->getBody();
-    //   $json_data = Json::decode($stream);
-    // }
-    // // Guzzle Exceptions - /vendor/guzzlehttp/guzzle/src/Exception
-    // catch (ClientException $e) {
-    //   \Drupal::messenger()->addError($e->getMessage());
-    // }
-    // catch (\Exception $e) {
-    //   \Drupal::messenger()->addError($e->getMessage());
-    // }
-
-    // // Need the store country to see if the service is available.
-    // // For testing can swap out with a country code uppercase. ex: US, CA.
-    // $store_country_code = $this->currentCountry->getCountry()->getCountryCode();
-
-    // // Loop through XPS Services
-    // foreach ($json_data['services'] as $service) {
-    //   // Get Service Label and code.
-    //   $service_label = $this->cleanServiceLabel($service['serviceLabel']);
-    //   $service_code = $service['serviceCode'];
-
-    //   // Need to check if inbound is false as we are only shipping out.
-    //   if($service['inbound'] == false) {
-    //     // Null will mean all countries are supported as per api docs.
-    //     // Supported countries are null and the country code is not in the unsupported countries.
-    //     if ($service['supportedCountries'] === null && ($service['unsupportedCountries'] !== null && !in_array($store_country_code, $service['unsupportedCountries']))) {
-    //       // Need to add Shipping service for this logic. US is not included as an example.
-    //       $this->services[$service_code] = new ShippingService($service_code, $this->t($service_label));
-    //     } elseif ($service['supportedCountries'] !== null && in_array($store_country_code, $service['supportedCountries'])) {
-    //       // Supported countries is not null and the country code is in supported countries.
-    //       $this->services[$service_code] = new ShippingService($service_code, $this->t($service_label));
-    //     } elseif ($service['unsupportedCountries'] !== null && in_array($store_country_code, $service['unsupportedCountries'])) {
-    //       // When the country is in the unsupported list continue.
-    //       continue;
-    //     } else {
-    //       // Add all shipping services as this is a fallback.
-    //       $this->services[$service_code] = new ShippingService($service_code, $this->t($service_label));
-    //     }
-    //   }
-    // }
-
-    // Custom Shipping Services here - TODO dynamic
-    $this->services['usps_priority'] = new ShippingService('usps_priority', $this->t('USPS Priority (1-3 Days)'));
-    $this->services['usps_express'] = new ShippingService('usps_express', $this->t('USPS Priority Mail Express'));
-    $this->services['usps_first_class'] = new ShippingService('usps_first_class', $this->t('USPS First Class'));
-    $this->services['usps_ground_advantage'] = new ShippingService('usps_ground_advantage', $this->t('USPS Ground Advantage'));
   }
 
   /**
@@ -220,6 +301,9 @@ class XPS extends ShippingMethodBase {
    * Get all the XPS Shipping quotes based on the services checked in the config.
    */
   public function getRateQuotes(array $services) {
+
+    //kint($this->configuration['services']);
+    // todo need to rebuild this.
 
     // Store Address
     $store_country_code = $this->commerceShipment->getOrder()->getStore()->getAddress()->getCountryCode();
@@ -354,22 +438,6 @@ class XPS extends ShippingMethodBase {
   }
 
   /**
-   * Utility function to clean the XPS Service Label.
-   *
-   * @param string $service
-   *   The service id.
-   *
-   * @return string
-   *   The cleaned up service id.
-   */
-  public function cleanServiceLabel($service_label) {
-    // Remove the html encoded trademarks markup.
-    $service_label = str_replace('&lt;sup&gt;&#8482;&lt;/sup&gt;', '', $service_label);
-    $service_label = str_replace('&lt;sup&gt;&#174;&lt;/sup&gt;', '', $service_label);
-    return $service_label;
-  }
-
-  /**
    * Logs the Request Data to Watchdog.
    */
   protected function logRequest($request) {
@@ -407,12 +475,6 @@ class XPS extends ShippingMethodBase {
    */
   public function buildConfigurationForm(array $form, FormStateInterface $form_state) {
     $form = parent::buildConfigurationForm($form, $form_state);
-
-    // Select all services by default.
-    // if (empty($this->configuration['services'])) {
-    $service_ids = array_keys($this->services);
-    //   $this->configuration['services'] = array_combine($service_ids, $service_ids);
-    // }
 
     $description = $this->t('Update your XPS Shipping API information.');
     if (!$this->isConfigured()) {
